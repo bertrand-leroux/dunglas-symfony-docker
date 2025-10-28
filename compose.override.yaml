@@ -1,6 +1,16 @@
 ---
 # Development environment override
 services:
+  traefik:
+    command:
+      - --api.insecure=true
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --log.level=DEBUG
+      - --accesslog=true
+
   php:
     build:
       context: .
@@ -14,7 +24,6 @@ services:
       #- /app/vendor
     environment:
       FRANKENPHP_WORKER_CONFIG: watch
-      MERCURE_EXTRA_DIRECTIVES: demo
       # See https://xdebug.org/docs/all_settings#mode
       XDEBUG_MODE: "${XDEBUG_MODE:-off}"
       APP_ENV: "${APP_ENV:-dev}"
@@ -22,5 +31,15 @@ services:
       # Ensure that host.docker.internal is correctly defined on Linux
       - host.docker.internal:host-gateway
     tty: true
+
+  mercure:
+    environment:
+      MERCURE_EXTRA_DIRECTIVES: |
+        anonymous
+        subscriptions
+        cors_origins *
+        demo
+        ui
+
 ###> symfony/mercure-bundle ###
 ###< symfony/mercure-bundle ###

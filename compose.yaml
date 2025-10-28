@@ -1,18 +1,38 @@
 ---
 services:
+  traefik:
+    image: traefik:v3.2
+    restart: unless-stopped
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+    networks:
+      - app_network
+
   php:
     image: ${IMAGES_PREFIX:-}app-php
     restart: unless-stopped
     environment:
-      SERVER_NAME: ${SERVER_NAME:-localhost}, php:80
-      DEFAULT_URI: https://${SERVER_NAME:-localhost}:${HTTPS_PORT:-443}
+      SERVER_NAME: ${SERVER_NAME:-app.localhost}, php:80
+      DEFAULT_URI: http://${SERVER_NAME:-app.localhost}
       MERCURE_PUBLISHER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
       MERCURE_SUBSCRIBER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
       # Run "composer require symfony/orm-pack" to install and configure Doctrine ORM
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-!ChangeMe!}@database:5432/${POSTGRES_DB:-app}?serverVersion=${POSTGRES_VERSION:-15}&charset=${POSTGRES_CHARSET:-utf8}
       # Run "composer require symfony/mercure-bundle" to install and configure the Mercure integration
-      MERCURE_URL: ${CADDY_MERCURE_URL:-http://php/.well-known/mercure}
-      MERCURE_PUBLIC_URL: ${CADDY_MERCURE_PUBLIC_URL:-https://${SERVER_NAME:-localhost}:${HTTPS_PORT:-443}/.well-known/mercure}
+      MERCURE_URL: http://mercure/.well-known/mercure
+      MERCURE_PUBLIC_URL: http://${SERVER_NAME:-app.localhost}/.well-known/mercure
       MERCURE_JWT_SECRET: ${CADDY_MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
       # The two next lines can be removed after initial installation
       SYMFONY_VERSION: ${SYMFONY_VERSION:-}
@@ -20,26 +40,51 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-    ports:
-      - name: http
-        target: 80
-        published: ${HTTP_PORT:-80}
-        protocol: tcp
-      - name: https
-        target: 443
-        published: ${HTTPS_PORT:-443}
-        protocol: tcp
-      - name: http3
-        target: 443
-        published: ${HTTP3_PORT:-443}
-        protocol: udp
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.app.rule=Host(`${SERVER_NAME:-app.localhost}`)
+      - traefik.http.routers.app.entrypoints=web,websecure
+      - traefik.http.services.app.loadbalancer.server.port=80
+      - traefik.http.services.app.loadbalancer.healthcheck.path=/
+      - traefik.http.services.app.loadbalancer.healthcheck.interval=10s
+    networks:
+      - app_network
+    depends_on:
+      - mercure
 
-# Mercure is installed as a Caddy module, prevent the Flex recipe from installing another service
+  mercure:
+    image: dunglas/mercure:v0.16
+    restart: unless-stopped
+    environment:
+      SERVER_NAME: ':80'
+      MERCURE_PUBLISHER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+      MERCURE_SUBSCRIBER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+      MERCURE_EXTRA_DIRECTIVES: |
+        anonymous
+        subscriptions
+        cors_origins *
+    volumes:
+      - mercure_data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.mercure.rule=Host(`${SERVER_NAME:-app.localhost}`) && PathPrefix(`/.well-known/mercure`)
+      - traefik.http.routers.mercure.entrypoints=web,websecure
+      - traefik.http.services.mercure.loadbalancer.server.port=80
+    networks:
+      - app_network
+
+# Mercure is now a standalone service
 ###> symfony/mercure-bundle ###
 ###< symfony/mercure-bundle ###
 
 volumes:
   caddy_data:
   caddy_config:
+  mercure_data:
+  traefik_certs:
 ###> symfony/mercure-bundle ###
 ###< symfony/mercure-bundle ###
+
+networks:
+  app_network:
+    driver: bridge
