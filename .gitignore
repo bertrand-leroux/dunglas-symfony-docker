@@ -1,0 +1,25 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.prod
+
+# Docker volumes data
+/data/
+/letsencrypt/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Symfony
+/vendor/
+/var/
+/public/bundles/
