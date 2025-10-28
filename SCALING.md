@@ -29,21 +29,41 @@ Cette configuration permet de scaler horizontalement les instances FrankenPHP (a
 ## Composants
 
 ### 1. Traefik (Reverse Proxy & Load Balancer)
+- **Gestion du domaine et TLS** : Seul Traefik connaît le nom de domaine
 - Distribution automatique des requêtes HTTP
 - Health checks sur les instances FrankenPHP
 - TLS automatique avec Let's Encrypt (production)
 - Dashboard de monitoring (développement uniquement)
 
 ### 2. FrankenPHP (Application Symfony)
+- **SERVER_NAME: ':80'** : Les instances PHP écoutent sur le port 80 sans gérer le domaine
 - **Worker mode activé** : Application Symfony gardée en mémoire
 - **Scalable horizontalement** : 2-5 instances selon la charge
+- **Générique et réutilisable** : Aucune connaissance du domaine public
 - Chaque instance traite les requêtes HTTP de manière indépendante
 - Publication vers le hub Mercure centralisé
 
 ### 3. Mercure (Hub de messaging temps réel)
+- **SERVER_NAME: ':80'** : Écoute sur le port 80, routé par Traefik
 - **Hub unique et partagé** entre toutes les instances
 - Garantit la cohérence des messages temps réel
 - Tous les clients reçoivent les messages, peu importe l'instance source
+
+## Séparation des responsabilités
+
+**Principe clé** : Seul Traefik gère le nom de domaine et les certificats TLS.
+
+| Responsabilité | Traefik | FrankenPHP | Mercure |
+|----------------|---------|------------|---------|
+| **Nom de domaine** | ✅ Gère le routage par Host | ❌ SERVER_NAME: ':80' | ❌ SERVER_NAME: ':80' |
+| **Certificats TLS** | ✅ Let's Encrypt | ❌ N/A | ❌ N/A |
+| **Port d'écoute** | 80/443 (public) | 80 (interne) | 80 (interne) |
+| **Scalabilité** | 1 instance | N instances | 1 instance |
+
+Cette architecture permet de :
+- Scaler les instances PHP sans reconfiguration
+- Changer de domaine sans rebuild des images PHP
+- Réutiliser les mêmes images pour différents environnements
 
 ## Utilisation
 
@@ -104,13 +124,16 @@ curl http://localhost:8080/api/http/services
 
 | Variable | Défaut | Description |
 |----------|--------|-------------|
-| `SERVER_NAME` | `app.localhost` | Nom de domaine de l'application |
-| `HTTP_PORT` | `80` | Port HTTP exposé |
-| `HTTPS_PORT` | `443` | Port HTTPS exposé |
+| `SERVER_NAME` | `app.localhost` | **Nom de domaine pour Traefik** (routage Host) |
+| `MERCURE_PUBLIC_URL` | `http://app.localhost/.well-known/mercure` | URL publique du hub Mercure pour les clients |
+| `HTTP_PORT` | `80` | Port HTTP exposé par Traefik |
+| `HTTPS_PORT` | `443` | Port HTTPS exposé par Traefik |
 | `APP_SECRET` | - | **Production uniquement** : Secret Symfony |
 | `CADDY_MERCURE_JWT_SECRET` | `!ChangeThisMercureHubJWTSecretKey!` | Secret JWT pour Mercure |
 | `ACME_EMAIL` | - | **Production uniquement** : Email pour Let's Encrypt |
 | `CORS_ORIGINS` | `https://${SERVER_NAME}` | Origines CORS autorisées pour Mercure |
+
+**Note importante** : Les instances PHP et Mercure ont `SERVER_NAME: ':80'` en dur dans `compose.yaml`. Seul Traefik utilise la variable `SERVER_NAME` pour le routage.
 
 ### Endpoints
 
@@ -253,13 +276,21 @@ curl -I http://votre-domaine.com
 
 Si vous migrez depuis la version précédente avec Mercure intégré :
 
-1. **Les données Mercure** : L'ancien volume `caddy_data` contient `mercure.db`. Ce fichier n'est plus utilisé car Mercure a maintenant son propre volume `mercure_data`.
+1. **SERVER_NAME des instances PHP** :
+   - **Avant** : `SERVER_NAME: ${SERVER_NAME:-localhost}, php:80`
+   - **Après** : `SERVER_NAME: ':80'`
+   - Les instances PHP n'ont plus besoin de connaître le nom de domaine
+   - Seul Traefik gère le domaine via les labels Docker
 
-2. **Variables d'environnement** : Les URLs Mercure ont changé :
+2. **Les données Mercure** : L'ancien volume `caddy_data` contient `mercure.db`. Ce fichier n'est plus utilisé car Mercure a maintenant son propre volume `mercure_data`.
+
+3. **Variables d'environnement** : Les URLs Mercure ont changé :
    - `MERCURE_URL` : `http://mercure/.well-known/mercure` (nom de service Docker)
-   - `MERCURE_PUBLIC_URL` : `http://app.localhost/.well-known/mercure` (URL publique)
+   - `MERCURE_PUBLIC_URL` : Nouvelle variable à définir (URL publique pour les clients)
 
-3. **Ports** : Les services PHP n'exposent plus de ports directement. Tout passe par Traefik.
+4. **Ports** : Les services PHP n'exposent plus de ports directement. Tout passe par Traefik.
+
+5. **Certificats TLS** : La gestion TLS est déplacée de Caddy vers Traefik (Let's Encrypt automatique).
 
 ## Ressources
 

@@ -29,6 +29,7 @@ services:
       APP_SECRET: ${APP_SECRET}
       MERCURE_PUBLISHER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET}
       MERCURE_SUBSCRIBER_JWT_KEY: ${CADDY_MERCURE_JWT_SECRET}
+      MERCURE_PUBLIC_URL: https://${SERVER_NAME}/.well-known/mercure
     labels:
       - traefik.http.routers.app.tls=true
       - traefik.http.routers.app.tls.certresolver=letsencrypt
